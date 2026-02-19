@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gesture Dino</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --accent: #10b981;
+            --text-main: #f8fafc;
+            --glass-bg: rgba(15, 23, 42, 0.7);
+        }
+
+        body {
+            margin: 0;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            font-family: 'Poppins', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Responsive Game Wrapper */
+        #game-wrapper {
+            position: relative;
+            width: 95vw;
+            max-width: 960px;
+            aspect-ratio: 16 / 9;
+            background: #1e293b;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Floating Webcam */
+        #webcam-container {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            width: 20%;
+            min-width: 100px;
+            aspect-ratio: 4 / 3;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 3px solid #334155;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease;
+            z-index: 10;
+        }
+        
+        #webcam-container.hand-detected {
+            border-color: var(--accent);
+            box-shadow: 0 0 15px var(--accent);
+        }
+
+        #webcam {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+            background: #000;
+        }
+
+        /* Glassmorphism UI Overlay */
+        .overlay {
+            position: absolute;
+            inset: 0;
+            background: var(--glass-bg);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            z-index: 20;
+            transition: opacity 0.3s ease;
+        }
+
+        .hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        h1 {
+            font-weight: 800;
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            margin: 0 0 10px 0;
+            letter-spacing: 2px;
+        }
+
+        p {
+            font-size: clamp(1rem, 2.5vw, 1.2rem);
+            color: #cbd5e1;
+            margin-bottom: 25px;
+        }
+
+        button {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 12px 30px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s, background 0.2s;
+            font-family: inherit;
+        }
+
+        button:hover {
+            background: #059669;
+            transform: scale(1.05);
+        }
+
+        /* In-Game HUD */
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .score {
+            font-size: clamp(1.2rem, 3vw, 2rem);
+            font-weight: 800;
+            color: var(--accent);
+            margin: 0;
+        }
+
+        .status {
+            font-size: clamp(0.8rem, 2vw, 1rem);
+            color: #94a3b8;
+            margin-top: 5px;
+        }
+
+        /* Controls Hint below the game */
+        #controls-hint {
+            margin-top: 20px;
+            display: flex;
+            gap: 20px;
+            font-weight: 600;
+            color: #94a3b8;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .key-box {
+            background: #1e293b;
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: 1px solid #334155;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-wrapper">
+        <canvas id="gameCanvas" width="960" height="540"></canvas>
+        
+        <div id="hud">
+            <div class="score" id="score-display">00000</div>
+            <div class="status" id="status-display">Fingers: 0</div>
+        </div>
+
+        <div id="webcam-container">
+            <video id="webcam" autoplay playsinline></video>
+        </div>
+
+        <div id="main-menu" class="overlay">
+            <h1>GESTURE DINO</h1>
+            <p>Play with your webcam. No keyboard needed.</p>
+            <button id="start-btn">Start Camera</button>
+        </div>
+
+        <div id="game-over-screen" class="overlay hidden">
+            <h1 style="color: #ef4444;">GAME OVER</h1>
+            <p id="final-score-display" style="font-size: 2rem; color: #10b981; font-weight: 800; margin-bottom: 10px; margin-top: 0;"></p>
+            <p>Show 🖐️ (Open Palm) to Restart</p>
+        </div>
+    </div>
+
+    <div id="controls-hint">
+        <div class="key-box">☝️ 1 Finger = Jump</div>
+        <div class="key-box">✌️ 2 Fingers = Duck</div>
+        <div class="key-box">🖐️ 4+ Fingers = Restart</div>
+    </div>
+
+    <script type="module">
+        import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const video = document.getElementById("webcam");
+        const webcamContainer = document.getElementById("webcam-container");
+        
+        const mainMenu = document.getElementById("main-menu");
+        const gameOverScreen = document.getElementById("game-over-screen");
+        const startBtn = document.getElementById("start-btn");
+        const scoreDisplay = document.getElementById("score-display");
+        const statusDisplay = document.getElementById("status-display");
+        const finalScoreDisplay = document.getElementById("final-score-display"); // NEW Element
+
+        // Game Constants & State
+        const VIRTUAL_WIDTH = 960;
+        const VIRTUAL_HEIGHT = 540;
+        const GROUND_Y = VIRTUAL_HEIGHT * 0.8;
+        
+        let handLandmarker = undefined;
+        let lastVideoTime = -1;
+        let lastAiTime = 0; 
+        let activeFingers = 0;
+        let handPresent = false;
+
+        let gameState = "menu"; // menu, loading, playing, gameover
+        let score = 0;
+        let speedMultiplier = 1.0;
+        let gameOverTime = 0; // NEW: Track when the player died
+        const BASE_SPEED = 380;
+
+        // Dino Object
+        const dino = {
+            x: 100,
+            y: GROUND_Y,
+            width: 60,
+            height: 70,
+            duckHeight: 40,
+            vy: 0,
+            gravity: 2400,
+            jumpForce: 1000,
+            state: "run", 
+            update(dt, action) {
+                const onGround = this.y >= GROUND_Y;
+                
+                if (action === "jump" && onGround) {
+                    this.vy = -this.jumpForce;
+                    this.state = "jump";
+                } else if (action === "duck" && onGround) {
+                    this.state = "duck";
+                } else if (onGround) {
+                    this.state = "run";
+                }
+
+                this.vy += this.gravity * dt;
+                this.y += this.vy * dt;
+
+                if (this.y >= GROUND_Y) {
+                    this.y = GROUND_Y;
+                    this.vy = 0;
+                }
+            },
+            draw() {
+                ctx.save(); 
+
+                ctx.font = "70px Arial";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "bottom";
+                
+                ctx.translate(this.x + this.width / 2, this.y);
+                ctx.scale(-1, 1); 
+                ctx.fillText("🦖", 0, 0); 
+                
+                ctx.restore(); 
+            },
+            getRect() {
+                const isDucking = this.state === "duck" && this.y >= GROUND_Y - 5;
+                const h = isDucking ? this.duckHeight : this.height;
+                return { x: this.x + 10, y: this.y - h + 10, width: this.width - 20, height: h - 10 };
+            }
+        };
+
+        let obstacles = [];
+
+        function spawnObstacle() {
+            const types = ["cactus"];
+            if (score > 400) types.push("cactus", "cactus"); 
+            if (score > 1200) types.push("bird");
+
+            const type = types[Math.floor(Math.random() * types.length)];
+            const speed = BASE_SPEED * speedMultiplier * (type === "bird" ? 1.2 : 1.0);
+            
+            let ob = { type, x: VIRTUAL_WIDTH + 50, speed, width: 40, height: 50 };
+            
+            if (type === "cactus") {
+                ob.y = GROUND_Y;
+                ob.emoji = "🌵";
+                ob.fontSize = Math.floor(Math.random() * 20 + 70);
+            } else {
+                ob.y = Math.random() > 0.5 ? GROUND_Y - 120 : GROUND_Y - 180;
+                ob.emoji = "🐦";
+                ob.fontSize = Math.floor(Math.random() * 15 + 60);
+                ob.oscSpeed = Math.random() * 5 + 5;
+                ob.oscHeight = Math.random() * 10 + 5;
+                ob.baseY = ob.y;
+            }
+            obstacles.push(ob);
+        }
+
+        // Initialize MediaPipe and Webcam upon button click
+        startBtn.addEventListener("click", async () => {
+            mainMenu.querySelector('h1').innerText = "LOADING...";
+            mainMenu.querySelector('p').innerText = "Please allow camera permissions.";
+            startBtn.style.display = "none";
+            gameState = "loading";
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                video.srcObject = stream;
+                
+                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+
+                mainMenu.classList.add("hidden");
+                gameState = "playing"; 
+                requestAnimationFrame(gameLoop);
+            } catch (err) {
+                mainMenu.querySelector('h1').innerText = "CAMERA ERROR";
+                mainMenu.querySelector('p').innerText = "Could not access webcam.";
+                console.error(err);
+            }
+        });
+
+        function countFingers(landmarks) {
+            const tips = [8, 12, 16, 20];
+            const pips = [6, 10, 14, 18];
+            let count = 0;
+            for (let i = 0; i < 4; i++) {
+                if (landmarks[tips[i]].y < landmarks[pips[i]].y) count++;
+            }
+            return count;
+        }
+
+        let lastTime = performance.now();
+        let spawnTimer = 0;
+
+        function gameLoop(currentTime) {
+            let dt = (currentTime - lastTime) / 1000.0;
+            if (dt > 0.1) dt = 0.1; 
+            lastTime = currentTime;
+
+            let action = "run";
+            
+            if (video.readyState >= 2 && handLandmarker) {
+                if (currentTime - lastAiTime > 60) {
+                    if (video.currentTime !== lastVideoTime) {
+                        lastVideoTime = video.currentTime;
+                        lastAiTime = currentTime;
+                        
+                        const result = handLandmarker.detectForVideo(video, currentTime);
+                        
+                        if (result.landmarks.length > 0) {
+                            handPresent = true;
+                            activeFingers = countFingers(result.landmarks[0]);
+                        } else {
+                            handPresent = false;
+                            activeFingers = 0;
+                        }
+                    }
+                }
+            }
+
+            if (handPresent) {
+                if (activeFingers === 1) action = "jump";
+                else if (activeFingers === 2) action = "duck";
+            }
+
+            if (handPresent) {
+                webcamContainer.classList.add('hand-detected');
+            } else {
+                webcamContainer.classList.remove('hand-detected');
+            }
+            statusDisplay.innerText = `Fingers: ${activeFingers}`;
+
+            // --- GAME LOGIC ---
+            if (gameState === "playing") {
+                score += dt * 100;
+                speedMultiplier = 1.0 + Math.floor(score / 300) * 0.05;
+
+                dino.update(dt, handPresent ? action : "run");
+
+                spawnTimer += dt;
+                const currentDelay = Math.max(0.7, 2.0 - (score / 800));
+                const maxObstacles = score < 1200 ? 1 : 2;
+
+                if (spawnTimer >= currentDelay && obstacles.length < maxObstacles) {
+                    spawnObstacle();
+                    spawnTimer = 0;
+                }
+
+                const dRect = dino.getRect();
+                for (let i = obstacles.length - 1; i >= 0; i--) {
+                    let ob = obstacles[i];
+                    ob.x -= ob.speed * dt;
+                    if (ob.type === "bird") {
+                        ob.y = ob.baseY + Math.sin(currentTime / 1000 * ob.oscSpeed) * ob.oscHeight;
+                    }
+
+                    // COLLISION DETECTION
+                    if (dRect.x < ob.x + ob.width && 
+                        dRect.x + dRect.width > ob.x &&
+                        dRect.y < ob.y && 
+                        dRect.y + dRect.height > ob.y - ob.height) {
+                        
+                        gameState = "gameover";
+                        gameOverTime = currentTime; // Log time of death
+                        finalScoreDisplay.innerText = `Score: ${Math.floor(score).toString().padStart(5, '0')}`; // Update final score text
+                        gameOverScreen.classList.remove("hidden");
+                    }
+
+                    if (ob.x < -100) obstacles.splice(i, 1);
+                }
+                
+                scoreDisplay.innerText = Math.floor(score).toString().padStart(5, '0');
+
+            } else if (gameState === "gameover") {
+                // Require at least a 1.5 second delay before letting them restart 
+                // to prevent instant restarts if they had 5 fingers up when dying.
+                if (currentTime - gameOverTime > 1500 && handPresent && activeFingers >= 4) {
+                    score = 0;
+                    obstacles = [];
+                    dino.y = GROUND_Y;
+                    dino.vy = 0;
+                    gameState = "playing";
+                    gameOverScreen.classList.add("hidden");
+                }
+            }
+
+            // --- RENDERING ---
+            ctx.clearRect(0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT);
+
+            ctx.fillStyle = "#334155";
+            ctx.fillRect(0, GROUND_Y, VIRTUAL_WIDTH, 4);
+
+            ctx.textAlign = "center";
+            ctx.textBaseline = "bottom";
+            for (let ob of obstacles) {
+                ctx.font = ob.fontSize + "px Arial";
+                ctx.fillText(ob.emoji, ob.x + ob.width/2, ob.y);
+            }
+
+            dino.draw();
+
+            if (gameState !== "menu") {
+                requestAnimationFrame(gameLoop);
+            }
+        }
+    </script>
+</body>
+</html>
